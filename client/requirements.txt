@@ -1,0 +1,2 @@
+# requirements.txt
+grpcio-tools ~= 1.30

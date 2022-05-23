@@ -1,0 +1,10 @@
+syntax = "proto3";
+message PayRequest {
+    string invoice_in = 1;
+}
+message PayResponse {
+    bool accepted = 1;
+}
+service Invoice {
+    rpc Pay (PayRequest) returns (PayResponse);
+}
