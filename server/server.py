@@ -8,39 +8,26 @@ import codecs
 
 os.environ["GRPC_SSL_CIPHER_SUITES"] = 'HIGH+ECDSA'
 
-import invoices_pb2 as lninvoices
-import invoices_pb2_grpc as lninvoices_grpc
-import router_pb2 as lnrouter
-import router_pb2_grpc as lnrouter_grpc
-import lightning_pb2 as ln
-import lightning_pb2_grpc as lngrpc
+import inspect
+import sys
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir) 
+sys.path.insert(0, parentdir + '/app') 
+import app
 
 class Service(intercom_pb2_grpc.InvoiceServicer):
     
     def Pay(self, request, context):
-        
-        # CHECK INCOMING REQUEST
-        print(request)
-        requested_price = 900
         remote_payment_request = request.invoice_in
+        print("Incoming request...")
+        if app.check_before_payment(remote_payment_request):
+            app.pay_payment_request(remote_payment_request)
+            app.update_agreed_price_server(remote_payment_request)
+            return PayResponse(accepted=True)
+        else:
+            return PayResponse(accepted=False)
+            #context.abort(grpc.StatusCode.ABORTED, "Channel partner asks for too much!")
 
-        # TODO CHECK PRICE
-        actual_price = 1000
-        if (requested_price > actual_price):
-            context.abort(grpc.StatusCode.ABORTED, "Value too low")
-
-        # PAY INCOMING REQUEST
-        print("Pay incoming request...")
-        request = lnrouter.SendPaymentRequest(
-            payment_request=remote_payment_request,
-            timeout_seconds= 5
-        )
-        print("gRPC request prepared.")
-        for response in stub()[1].SendPaymentV2(request, metadata=[('macaroon', macaroon())]):
-            print(response)
-        print("Payment successful.")
-
-        return PayResponse(accepted=True)
 
 def serve():
     server = grpc.server(
@@ -61,26 +48,11 @@ def serve():
         root_certificates=ca_cert,
         require_client_auth=True,
     )
-    server.add_secure_port("[::]:50051", creds)
+    port = app.get_hfx_config('port_server')
+    server.add_secure_port(f"[::]:{port}", creds)
 
     server.start()
     server.wait_for_termination()
-
-def stub():
-    # TODO Paths to cert should be in a config file
-    cert = open(os.path.expanduser('~/bitcoin-regtest/.lnd1/tls.cert'), 'rb').read()
-    creds = grpc.ssl_channel_credentials(cert)
-    # TODO Port of LND should be in config file
-    channel = grpc.secure_channel('localhost:10001', creds)
-    stub = lngrpc.LightningStub(channel)
-    router_stub = lnrouter_grpc.RouterStub(channel)
-    return stub, router_stub
-
-def macaroon():
-    # TODO Path to macaroon should be in a config file
-    with open(os.path.expanduser('~/bitcoin-regtest/.lnd1/data/chain/bitcoin/regtest/admin.macaroon'), 'rb') as f:
-        macaroon_bytes = f.read()
-    return codecs.encode(macaroon_bytes, 'hex')
 
 if __name__ == "__main__":
     serve()
